@@ -1,0 +1,133 @@
+use std::collections::HashMap;
+use bevy::{
+    color::palettes::*,
+    prelude::*,
+    input::*
+};
+
+
+#[derive(Resource)]
+struct CursorPos(Vec2);
+
+
+
+#[derive(Component)]
+struct CameraEntityInfos {
+    visionview: f32,
+}
+
+#[derive(Component)]
+struct SnakeEntityInfos {
+    piece: i32,
+    color: Srgba,
+    health: f32,
+    vision: f32,
+    speed: f32,
+}
+
+#[derive(Component)]
+struct MainCamera;
+
+#[derive(Component)]
+struct Player;
+
+fn main() {
+    App::new()
+    .add_plugins(DefaultPlugins)
+    .insert_resource(CursorPos(Vec2::ZERO)) // Separate insert for each
+    .add_systems(Startup, setup)
+    .add_systems(Update, (get_cursor, plmvmnt))
+    .run();
+}
+
+fn setup(
+    mut cmd: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    cmd.spawn(Camera2d)
+    .insert(CameraEntityInfos {
+        visionview: 10.0,
+    });
+
+    // Spawn main player entity
+    cmd.spawn(Transform::from_xyz(0.0, 0.0, 0.0))
+    .insert(Mesh2d(meshes.add(Capsule2d::new(20.0, 50.0))))
+    .insert(MeshMaterial2d(materials.add(Color::srgba(0.0, 8.0, 0.0, 1.0))))
+    .insert(SnakeEntityInfos {
+        piece: 0,
+        color: Srgba::new(0.0, 8.0, 0.0, 1.0),
+            health: 100.0,
+            vision: 10.0,
+            speed: 20.0,
+    })
+    .insert(Player);
+
+}
+
+fn get_cursor(
+    camera_query: Single<(&Camera, &GlobalTransform)>,
+              windows: Query<&Window>,
+              mut curpos: ResMut<CursorPos>,
+) {
+    let (camera, camera_transform) = *camera_query;
+
+    let Ok(window) = windows.get_single() else { return; };
+    let Some(cursor_position) = window.cursor_position() else { return; };
+    let Ok(point) = camera.viewport_to_world_2d(camera_transform, cursor_position) else { return; };
+
+    curpos.0 = point;
+    println!("{:?}", curpos.0);
+}
+
+fn plmvmnt(
+    kb: Res<ButtonInput<KeyCode>>,
+    mb: Res<ButtonInput<MouseButton>>,
+    mut pl_q: Query<(&SnakeEntityInfos, &mut Transform), With<Player>>,
+           curpos: Res<CursorPos>,
+           time: Res<Time>,  // Add a reference to Time for smooth transitions
+) {
+
+        for (sei, mut transform) in pl_q.iter_mut() {
+
+            // Player Rotation
+            let pos: Vec2 = Vec2::new(transform.translation.x, transform.translation.y);
+            let target: Vec2 = Vec2::new(curpos.0.x, curpos.0.y);
+            let direction = target - pos;
+
+            if direction.length_squared() > 0.0 {
+                let pi = std::f32::consts::PI;
+
+                let true_angle = direction.y.atan2(direction.x);
+                let current_angle = transform.rotation.to_euler(EulerRot::ZXY).0;
+
+                let mut diff_angle = true_angle - pi / 2.0 - current_angle;
+
+                if diff_angle > pi {
+                    diff_angle -= 2.0 * pi;
+                } else if diff_angle < -pi {
+                    diff_angle += 2.0 * pi;
+                }
+
+                let change_angle = diff_angle * sei.speed * time.delta_secs();
+
+                transform.rotation = Quat::from_rotation_z(current_angle + change_angle);
+            }
+
+            // Player Movement
+            let mut speed = 10.0;  // Default speed
+
+            if kb.pressed(KeyCode::ShiftLeft) {
+                speed = 25.0;  // Increased speed when holding Shift
+            }
+
+            // Moving towards the cursor
+            if mb.pressed(MouseButton::Left) {
+                let click_move = ((curpos.0 - transform.translation.truncate()).normalize() * speed * 50.0 * time.delta_secs());
+                transform.translation += click_move.extend(0.0);  // not .forward() yet
+            }
+        }
+
+
+}
+
